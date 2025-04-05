@@ -3,9 +3,9 @@ import sys
 import cv2
 import numpy as np
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QPushButton,
-                            QVBoxLayout, QHBoxLayout, QLabel, QFileDialog,
-                            QSpinBox, QGroupBox, QDoubleSpinBox, QStatusBar,
-                            QSizePolicy, QMessageBox)
+                             QVBoxLayout, QHBoxLayout, QLabel, QFileDialog,
+                             QSpinBox, QGroupBox, QDoubleSpinBox, QStatusBar,
+                             QSizePolicy, QMessageBox, QTextEdit)
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QImage, QPixmap, QPalette, QColor, QBrush
 from ultralytics import YOLO
@@ -30,7 +30,6 @@ class ObjectTrackingApp(QMainWindow):
         self.FRAME_H = None
         self.FRAME_W = None
         self.DELTA_T = 1.0 / 30.0
-        self.background_image_path = None
 
         # --- 跟踪状态变量 ---
         self.prev_positions = defaultdict(lambda: None)
@@ -47,13 +46,13 @@ class ObjectTrackingApp(QMainWindow):
 
     def initUI(self):
         """初始化UI界面"""
-        self.setWindowTitle('智能车辆分析系统')
+        self.setWindowTitle('智能车辆分析与预警系统')
         self.setGeometry(100, 100, 1450, 950)
 
         # --- 设置主窗口背景 ---
         palette = self.palette()
         gradient = "qlineargradient(spread:pad, x1:0, y1:0, x2:0, y2:1, stop:0 #E1F5FE, stop:1 #B3E5FC)"
-        palette.setBrush(QPalette.Window, QBrush(QColor(240, 240, 240))) # Light gray background
+        palette.setBrush(QPalette.Window, QBrush(QColor(240, 240, 240)))  # Light gray background
         self.setPalette(palette)
         self.setAutoFillBackground(True)
 
@@ -174,38 +173,34 @@ class ObjectTrackingApp(QMainWindow):
         rel_denom_layout.addWidget(self.rel_denom_spinbox)
         params_layout.addLayout(rel_denom_layout)
 
-        # --- 背景图片设置组 ---
-        background_group = QGroupBox("背景设置")
-        self.style_group_box(background_group)
-        background_layout = QVBoxLayout(background_group)
-        self.background_path_label = QLabel('当前背景图片: 无')
-        self.background_path_label.setWordWrap(True)
-        self.style_label(self.background_path_label)
-        self.load_background_btn = QPushButton('选择背景图片')
-        self.style_button(self.load_background_btn)
-        self.load_background_btn.clicked.connect(self.load_background_image)
-        background_layout.addWidget(self.background_path_label)
-        background_layout.addWidget(self.load_background_btn)
-
         # --- 控制按钮 ---
         self.start_btn = QPushButton('开始分析')
-        self.style_button(self.start_btn, bold=True, color="#4CAF50") # Green start button
+        self.style_button(self.start_btn, bold=True, color="#4CAF50")  # Green start button
         self.start_btn.clicked.connect(self.toggle_processing)
         self.start_btn.setEnabled(False)
         self.start_btn.setMinimumHeight(50)
+
+        # --- 预警信息显示组 ---
+        alert_group = QGroupBox("预警信息")
+        self.style_group_box(alert_group)
+        alert_layout = QVBoxLayout(alert_group)
+        self.feedback_label = QTextEdit()
+        self.feedback_label.setReadOnly(True)
+        self.feedback_label.setStyleSheet("font-size: 14px;")
+        alert_layout.addWidget(self.feedback_label)
 
         # --- 将所有组件添加到控制面板布局 ---
         control_layout.addWidget(model_group)
         control_layout.addWidget(video_group)
         control_layout.addWidget(params_group)
-        control_layout.addWidget(background_group)
-        control_layout.addStretch(1)
         control_layout.addWidget(self.start_btn)
+        control_layout.addWidget(alert_group)
+        control_layout.addStretch(1)
 
         # --- 右侧视频显示 ---
         self.video_label = QLabel("请先加载模型和视频文件")
         self.video_label.setAlignment(Qt.AlignCenter)
-        self.video_label.setStyleSheet("background-color: #212121; color: #ffffff; border-radius: 10px; padding: 10px;") # Dark background for video
+        self.video_label.setStyleSheet("background-color: #212121; color: #ffffff; border-radius: 10px; padding: 10px;")
         self.video_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.video_label.setMinimumSize(800, 600)
 
@@ -223,17 +218,17 @@ class ObjectTrackingApp(QMainWindow):
         group_box.setStyleSheet("""
             QGroupBox {
                 font-size: 16px;
-                border: 2px solid #42A5F5; /* Blue border */
+                border: 2px solid #42A5F5;
                 border-radius: 7px;
                 margin-top: 15px;
-                background-color: #e3f2fd; /* Light blue background */
+                background-color: #e3f2fd;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
                 subcontrol-position: top left;
                 left: 10px;
                 padding: 0 3px 0 3px;
-                color: #1976D2; /* Darker blue title */
+                color: #1976D2;
             }
         """)
 
@@ -330,24 +325,6 @@ class ObjectTrackingApp(QMainWindow):
                 self.cap = None
                 QMessageBox.critical(self, "视频加载错误", f"加载视频时发生错误:\n{e}")
 
-    def load_background_image(self):
-        file_name, _ = QFileDialog.getOpenFileName(self, "选择背景图片", "", "图像文件 (*.png *.jpg *.jpeg *.bmp)")
-        if file_name:
-            self.background_image_path = file_name
-            self.background_path_label.setText(f"当前背景图片: {os.path.basename(file_name)}")
-            self.apply_background_image()
-
-    def apply_background_image(self):
-        if self.background_image_path:
-            self.centralWidget().setStyleSheet(f"background-image: url({self.background_image_path}); background-repeat: no-repeat; background-position: center;")
-        else:
-            # Revert to the default gradient background if no image is selected
-            palette = self.palette()
-            gradient = "qlineargradient(spread:pad, x1:0, y1:0, x2:0, y2:1, stop:0 #E1F5FE, stop:1 #B3E5FC)"
-            palette.setBrush(QPalette.Window, QBrush(QColor(240, 240, 240))) # Light gray background
-            self.setPalette(palette)
-            self.setAutoFillBackground(True)
-
     def check_start_conditions(self):
         ready = self.model is not None and self.cap is not None and self.cap.isOpened()
         self.start_btn.setEnabled(ready)
@@ -369,13 +346,12 @@ class ObjectTrackingApp(QMainWindow):
 
             self.is_processing = True
             self.start_btn.setText('停止分析')
-            self.style_button(self.start_btn, bold=True, color="#f44336") # Red stop button
+            self.style_button(self.start_btn, bold=True, color="#f44336")  # Red stop button
             self.statusBar.showMessage("正在处理视频...")
             for widget in self.findChildren((QSpinBox, QDoubleSpinBox)):
                 widget.setEnabled(False)
             self.load_model_btn.setEnabled(False)
             self.load_video_btn.setEnabled(False)
-            self.load_background_btn.setEnabled(False)
 
             timer_interval = int(self.DELTA_T * 1000) if self.DELTA_T > 0 else 33
             self.timer.start(max(1, timer_interval))
@@ -383,13 +359,28 @@ class ObjectTrackingApp(QMainWindow):
             self.is_processing = False
             self.timer.stop()
             self.start_btn.setText('开始分析')
-            self.style_button(self.start_btn, bold=True, color="#4CAF50") # Revert to green start button
+            self.style_button(self.start_btn, bold=True, color="#4CAF50")
             self.statusBar.showMessage("处理已停止", 5000)
             for widget in self.findChildren((QSpinBox, QDoubleSpinBox)):
                 widget.setEnabled(True)
             self.load_model_btn.setEnabled(True)
             self.load_video_btn.setEnabled(True)
-            self.load_background_btn.setEnabled(True)
+
+    def evaluate_danger(self, speed):
+        """
+        根据目标的速度与基准速度的差值评估危险等级
+        返回：(风险等级字符串, 对应颜色BGR元组)
+        """
+        # 这里采用一个简单的阈值划分方法：
+        # 若目标速度 > 基准速度 + 30，则为“危险”（红色）
+        # 若目标速度 > 基准速度 + 10，则为“注意”（黄色）
+        # 否则为“安全”（绿色）
+        if speed > self.CAMERA_SPEED_KMH + 30:
+            return "危险", (0, 0, 255)
+        elif speed > self.CAMERA_SPEED_KMH + 10:
+            return "注意", (0, 255, 255)
+        else:
+            return "安全", (50, 205, 50)
 
     def update_frame(self):
         if not self.is_processing or not self.cap or not self.cap.isOpened():
@@ -406,6 +397,8 @@ class ObjectTrackingApp(QMainWindow):
             return
 
         processed_frame = frame.copy()
+        # 用于实时反馈信息的列表
+        feedback_list = []
 
         try:
             results = self.model.track(
@@ -464,14 +457,19 @@ class ObjectTrackingApp(QMainWindow):
 
                     self.prev_positions[track_id] = current_pos
 
-                    color = (50, 205, 50)
-                    cv2.rectangle(processed_frame, (x1, y1), (x2, y2), color, 2)
-                    label = f"ID:{track_id}"
+                    # 若已计算出速度，则进行危险等级评估
                     if speed_calculated and self.estimated_speeds[track_id] > 0.1:
-                        label += f" {self.estimated_speeds[track_id]:.1f}km/h"
+                        risk_level, color = self.evaluate_danger(self.estimated_speeds[track_id])
+                        label = f"ID:{track_id} {self.estimated_speeds[track_id]:.1f}km/h [{risk_level}]"
                     else:
-                        label += " ...km/h"
+                        risk_level, color = "未知", (255, 255, 255)
+                        label = f"ID:{track_id} ...km/h"
 
+                    # 更新反馈信息
+                    feedback_list.append(label)
+
+                    # 绘制边框及标签
+                    cv2.rectangle(processed_frame, (x1, y1), (x2, y2), color, 2)
                     (label_width, label_height), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
                     label_y = y1 - 5 if y1 - 5 > label_height else y1 + label_height + 5
                     overlay = processed_frame.copy()
@@ -480,6 +478,7 @@ class ObjectTrackingApp(QMainWindow):
                     cv2.addWeighted(overlay, alpha, processed_frame, 1 - alpha, 0, processed_frame)
                     cv2.putText(processed_frame, label, (x1, label_y - baseline + 1), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
+                # 清除消失的目标数据
                 disappeared_ids = set(self.estimated_speeds.keys()) - current_tracked_ids
                 for gone_id in disappeared_ids:
                     self.estimated_speeds.pop(gone_id, None)
@@ -487,9 +486,18 @@ class ObjectTrackingApp(QMainWindow):
 
             self.display_frame(processed_frame)
 
+            # 更新预警信息区域
+            self.feedback_label.setPlainText("\n".join(feedback_list))
+            # 若检测到有“危险”目标，则在状态栏发出预警提示
+            if any("危险" in txt for txt in feedback_list):
+                self.statusBar.showMessage("预警：检测到危险车辆！", 3000)
+            else:
+                self.statusBar.showMessage("正在处理...", 1000)
+
             end_frame_time = time.time()
             processing_fps = 1.0 / (end_frame_time - start_frame_time) if (end_frame_time - start_frame_time) > 0 else 0
-            self.statusBar.showMessage(f"正在处理... FPS: {processing_fps:.1f}")
+            # 同时显示处理帧率信息
+            self.statusBar.showMessage(f"正在处理... FPS: {processing_fps:.1f}", 1000)
 
         except Exception as e:
             print(f"处理帧时发生严重错误: {e}")
