@@ -366,18 +366,19 @@ class ObjectTrackingApp(QMainWindow):
             self.load_model_btn.setEnabled(True)
             self.load_video_btn.setEnabled(True)
 
-    def evaluate_danger(self, speed):
+    def evaluate_danger(self, speed, relative_area):
         """
-        根据目标的速度与基准速度的差值评估危险等级
-        返回：(风险等级字符串, 对应颜色BGR元组)
+        根据车辆速度和目标在图像中的相对面积（作为距离近似指标）来评估危险等级。
+        danger_score = estimated_speed * relative_area
+        阈值可根据实际情况进行调试：
+        - danger_score > 10 认为危险（红色）
+        - danger_score > 5  认为注意（黄色）
+        - 否则为安全（绿色）
         """
-        # 这里采用一个简单的阈值划分方法：
-        # 若目标速度 > 基准速度 + 30，则为“危险”（红色）
-        # 若目标速度 > 基准速度 + 10，则为“注意”（黄色）
-        # 否则为“安全”（绿色）
-        if speed > self.CAMERA_SPEED_KMH + 30:
+        danger_score = speed * relative_area
+        if danger_score > 10:
             return "危险", (0, 0, 255)
-        elif speed > self.CAMERA_SPEED_KMH + 10:
+        elif danger_score > 5:
             return "注意", (0, 255, 255)
         else:
             return "安全", (50, 205, 50)
@@ -397,7 +398,6 @@ class ObjectTrackingApp(QMainWindow):
             return
 
         processed_frame = frame.copy()
-        # 用于实时反馈信息的列表
         feedback_list = []
 
         try:
@@ -444,6 +444,7 @@ class ObjectTrackingApp(QMainWindow):
 
                             distance_meters = distance * self.DISTANCE_SCALE * correction_factor
 
+                            # 原先的速度计算：仅依赖于位移（速度与目标相对运动）
                             relative_speed = self.CAMERA_SPEED_KMH * (1 - (distance_meters / self.RELATIVE_SPEED_DENOMINATOR))
                             relative_speed = max(0, relative_speed)
 
@@ -457,38 +458,34 @@ class ObjectTrackingApp(QMainWindow):
 
                     self.prev_positions[track_id] = current_pos
 
-                    # 若已计算出速度，则进行危险等级评估
+                    # 如果速度已经计算，同时确保相对面积不为0
                     if speed_calculated and self.estimated_speeds[track_id] > 0.1:
-                        risk_level, color = self.evaluate_danger(self.estimated_speeds[track_id])
+                        # 使用当前目标的相对面积来辅助判断危险等级
+                        current_area = (current_size[0] * current_size[1]) / (self.FRAME_W * self.FRAME_H)
+                        risk_level, color = self.evaluate_danger(self.estimated_speeds[track_id], current_area)
                         label = f"ID:{track_id} {self.estimated_speeds[track_id]:.1f}km/h [{risk_level}]"
                     else:
                         risk_level, color = "未知", (255, 255, 255)
                         label = f"ID:{track_id} ...km/h"
 
-                    # 更新反馈信息
                     feedback_list.append(label)
 
-                    # 绘制边框及标签
                     cv2.rectangle(processed_frame, (x1, y1), (x2, y2), color, 2)
                     (label_width, label_height), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
                     label_y = y1 - 5 if y1 - 5 > label_height else y1 + label_height + 5
                     overlay = processed_frame.copy()
-                    cv2.rectangle(overlay, (x1, label_y - label_height - baseline), (x1 + label_width, label_y), (0,0,0), -1)
+                    cv2.rectangle(overlay, (x1, label_y - label_height - baseline), (x1 + label_width, label_y), (0, 0, 0), -1)
                     alpha = 0.6
                     cv2.addWeighted(overlay, alpha, processed_frame, 1 - alpha, 0, processed_frame)
                     cv2.putText(processed_frame, label, (x1, label_y - baseline + 1), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
-                # 清除消失的目标数据
                 disappeared_ids = set(self.estimated_speeds.keys()) - current_tracked_ids
                 for gone_id in disappeared_ids:
                     self.estimated_speeds.pop(gone_id, None)
                     self.prev_positions.pop(gone_id, None)
 
             self.display_frame(processed_frame)
-
-            # 更新预警信息区域
             self.feedback_label.setPlainText("\n".join(feedback_list))
-            # 若检测到有“危险”目标，则在状态栏发出预警提示
             if any("危险" in txt for txt in feedback_list):
                 self.statusBar.showMessage("预警：检测到危险车辆！", 3000)
             else:
@@ -496,7 +493,6 @@ class ObjectTrackingApp(QMainWindow):
 
             end_frame_time = time.time()
             processing_fps = 1.0 / (end_frame_time - start_frame_time) if (end_frame_time - start_frame_time) > 0 else 0
-            # 同时显示处理帧率信息
             self.statusBar.showMessage(f"正在处理... FPS: {processing_fps:.1f}", 1000)
 
         except Exception as e:
@@ -504,6 +500,7 @@ class ObjectTrackingApp(QMainWindow):
             self.display_frame(frame)
             self.toggle_processing()
             QMessageBox.critical(self, "处理错误", f"处理视频帧时发生错误:\n{e}")
+
 
     def display_frame(self, frame):
         if frame is None:
