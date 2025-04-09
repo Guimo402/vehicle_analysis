@@ -20,7 +20,7 @@ class ObjectTrackingApp(QMainWindow):
         super().__init__()
 
         # --- 初始化速度估计参数 ---
-        self.CAMERA_SPEED_KMH = 80.0
+        self.CAMERA_SPEED_KMH = 110.0
         self.SMOOTH_FACTOR = 0.5
         self.DISTANCE_SCALE = 0.2
         self.RELATIVE_SPEED_DENOMINATOR = 30.0
@@ -132,7 +132,7 @@ class ObjectTrackingApp(QMainWindow):
 
         # 平滑因子
         smooth_layout = QHBoxLayout()
-        smooth_label = QLabel('平滑因子 (越小越平滑):')
+        smooth_label = QLabel('平滑因子:')
         self.style_label(smooth_label)
         smooth_layout.addWidget(smooth_label)
         self.smooth_spinbox = QDoubleSpinBox()
@@ -377,11 +377,11 @@ class ObjectTrackingApp(QMainWindow):
         """
         danger_score = speed * relative_area
         if danger_score > 10:
-            return "危险", (0, 0, 255)
+            return "danger", (0, 0, 255)
         elif danger_score > 5:
-            return "注意", (0, 255, 255)
+            return "warning", (0, 255, 255)
         else:
-            return "安全", (50, 205, 50)
+            return "safe", (50, 205, 50)
 
     def update_frame(self):
         if not self.is_processing or not self.cap or not self.cap.isOpened():
@@ -465,8 +465,9 @@ class ObjectTrackingApp(QMainWindow):
                         risk_level, color = self.evaluate_danger(self.estimated_speeds[track_id], current_area)
                         label = f"ID:{track_id} {self.estimated_speeds[track_id]:.1f}km/h [{risk_level}]"
                     else:
-                        risk_level, color = "未知", (255, 255, 255)
-                        label = f"ID:{track_id} ...km/h"
+                        # 当速度尚未计算时，显示"计算中"而不是问号
+                        risk_level, color = "caculating", (255, 255, 255)
+                        label = f"ID:{track_id} caculating..."
 
                     feedback_list.append(label)
 

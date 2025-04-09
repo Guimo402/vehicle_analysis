@@ -3,9 +3,9 @@ import sys
 import cv2
 import numpy as np
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QPushButton,
-                            QVBoxLayout, QHBoxLayout, QLabel, QFileDialog,
-                            QSpinBox, QGroupBox, QDoubleSpinBox, QStatusBar,
-                            QSizePolicy, QMessageBox)
+                             QVBoxLayout, QHBoxLayout, QLabel, QFileDialog,
+                             QSpinBox, QGroupBox, QDoubleSpinBox, QStatusBar,
+                             QSizePolicy, QMessageBox, QTextEdit)
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QImage, QPixmap, QPalette, QColor, QBrush
 from ultralytics import YOLO
@@ -20,11 +20,15 @@ class ObjectTrackingApp(QMainWindow):
         super().__init__()
 
         # --- 初始化速度估计参数 ---
-        self.CAMERA_SPEED_KMH = 80.0
+        self.CAMERA_SPEED_KMH = 110.0
         self.SMOOTH_FACTOR = 0.5
         self.DISTANCE_SCALE = 0.2
-        self.RELATIVE_SPEED_DENOMINATOR = 30.0
+        # 此处我们引入新的 K_FACTOR 参数，用于缩放速度变化（示例值200.0）
+        self.K_FACTOR = 200.0  
         self.CONFIDENCE_THRESHOLD = 0.3
+        # 新增速度稳定性参数
+        self.MAX_SPEED_CHANGE = 5.0  # 每帧最大速度变化（km/h）
+        self.EXIT_ZONE_RATIO = 0.8   # 定义图像右下角的退出区域比例
 
         # --- 内部状态变量 ---
         self.FRAME_H = None
@@ -34,6 +38,9 @@ class ObjectTrackingApp(QMainWindow):
         # --- 跟踪状态变量 ---
         self.prev_positions = defaultdict(lambda: None)
         self.estimated_speeds = defaultdict(float)
+        self.speed_history = defaultdict(list)  # 存储每个目标的历史速度
+        self.exit_zone_detected = defaultdict(bool)  # 标记目标是否进入退出区域
+        self.exit_zone_speeds = defaultdict(float)   # 存储目标进入退出区域时的速度
 
         # --- 其他变量 ---
         self.model = None
@@ -46,13 +53,13 @@ class ObjectTrackingApp(QMainWindow):
 
     def initUI(self):
         """初始化UI界面"""
-        self.setWindowTitle('智能车辆分析系统')
+        self.setWindowTitle('智能车辆分析与预警系统')
         self.setGeometry(100, 100, 1450, 950)
 
         # --- 设置主窗口背景 ---
         palette = self.palette()
         gradient = "qlineargradient(spread:pad, x1:0, y1:0, x2:0, y2:1, stop:0 #E1F5FE, stop:1 #B3E5FC)"
-        palette.setBrush(QPalette.Window, QBrush(QColor(240, 240, 240))) # Light gray background
+        palette.setBrush(QPalette.Window, QBrush(QColor(240, 240, 240)))  # Light gray background
         self.setPalette(palette)
         self.setAutoFillBackground(True)
 
@@ -132,7 +139,7 @@ class ObjectTrackingApp(QMainWindow):
 
         # 平滑因子
         smooth_layout = QHBoxLayout()
-        smooth_label = QLabel('平滑因子 (越小越平滑):')
+        smooth_label = QLabel('平滑因子:')
         self.style_label(smooth_label)
         smooth_layout.addWidget(smooth_label)
         self.smooth_spinbox = QDoubleSpinBox()
@@ -159,38 +166,34 @@ class ObjectTrackingApp(QMainWindow):
         dist_scale_layout.addWidget(self.dist_scale_spinbox)
         params_layout.addLayout(dist_scale_layout)
 
-        # 相对速度分母
-        rel_denom_layout = QHBoxLayout()
-        rel_denom_label = QLabel('相对速度分母:')
-        self.style_label(rel_denom_label)
-        rel_denom_layout.addWidget(rel_denom_label)
-        self.rel_denom_spinbox = QDoubleSpinBox()
-        self.style_spinbox(self.rel_denom_spinbox)
-        self.rel_denom_spinbox.setRange(1.0, 200.0)
-        self.rel_denom_spinbox.setSingleStep(1.0)
-        self.rel_denom_spinbox.setValue(self.RELATIVE_SPEED_DENOMINATOR)
-        self.rel_denom_spinbox.valueChanged.connect(lambda v: setattr(self, 'RELATIVE_SPEED_DENOMINATOR', v))
-        rel_denom_layout.addWidget(self.rel_denom_spinbox)
-        params_layout.addLayout(rel_denom_layout)
-
         # --- 控制按钮 ---
         self.start_btn = QPushButton('开始分析')
-        self.style_button(self.start_btn, bold=True, color="#4CAF50") # Green start button
+        self.style_button(self.start_btn, bold=True, color="#4CAF50")  # Green start button
         self.start_btn.clicked.connect(self.toggle_processing)
         self.start_btn.setEnabled(False)
         self.start_btn.setMinimumHeight(50)
+
+        # --- 预警信息显示组 ---
+        alert_group = QGroupBox("预警信息")
+        self.style_group_box(alert_group)
+        alert_layout = QVBoxLayout(alert_group)
+        self.feedback_label = QTextEdit()
+        self.feedback_label.setReadOnly(True)
+        self.feedback_label.setStyleSheet("font-size: 14px;")
+        alert_layout.addWidget(self.feedback_label)
 
         # --- 将所有组件添加到控制面板布局 ---
         control_layout.addWidget(model_group)
         control_layout.addWidget(video_group)
         control_layout.addWidget(params_group)
-        control_layout.addStretch(1)
         control_layout.addWidget(self.start_btn)
+        control_layout.addWidget(alert_group)
+        control_layout.addStretch(1)
 
         # --- 右侧视频显示 ---
         self.video_label = QLabel("请先加载模型和视频文件")
         self.video_label.setAlignment(Qt.AlignCenter)
-        self.video_label.setStyleSheet("background-color: #212121; color: #ffffff; border-radius: 10px; padding: 10px;") # Dark background for video
+        self.video_label.setStyleSheet("background-color: #212121; color: #ffffff; border-radius: 10px; padding: 10px;")
         self.video_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.video_label.setMinimumSize(800, 600)
 
@@ -208,17 +211,17 @@ class ObjectTrackingApp(QMainWindow):
         group_box.setStyleSheet("""
             QGroupBox {
                 font-size: 16px;
-                border: 2px solid #42A5F5; /* Blue border */
+                border: 2px solid #42A5F5;
                 border-radius: 7px;
                 margin-top: 15px;
-                background-color: #e3f2fd; /* Light blue background */
+                background-color: #e3f2fd;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
                 subcontrol-position: top left;
                 left: 10px;
                 padding: 0 3px 0 3px;
-                color: #1976D2; /* Darker blue title */
+                color: #1976D2;
             }
         """)
 
@@ -323,6 +326,116 @@ class ObjectTrackingApp(QMainWindow):
         elif not ready:
             self.start_btn.setText('开始分析')
 
+    # -------------------------------
+    # 新增辅助函数：计算校正因子和估计速度
+    # -------------------------------
+    def compute_correction_factor(self, current_pos, current_size):
+        """
+        根据目标在图像中的位置和尺寸计算透视校正系数
+        """
+        if self.FRAME_W is None or self.FRAME_H is None:
+            return 1.0
+        y_factor = 1.0 + (1.0 - current_pos[1] / self.FRAME_H) * 2.0
+        relative_area = (current_size[0] * current_size[1]) / (self.FRAME_W * self.FRAME_H)
+        size_factor = 1.0 + (1.0 - min(relative_area * 1000, 0.9)) * 2.0
+        x_factor = 1.0 + 0.2 * abs(current_pos[0] / self.FRAME_W - 0.5)
+        position_factor = 1.0
+        if current_pos[0] > self.FRAME_W * 0.75 and current_pos[1] > self.FRAME_H * 0.75:
+            position_factor = 0.7
+        correction_factor = y_factor * size_factor * x_factor * position_factor
+        return correction_factor
+
+    def is_in_exit_zone(self, position):
+        """
+        判断目标是否在退出区域（右下角）
+        """
+        x, y = position
+        return (x > self.FRAME_W * self.EXIT_ZONE_RATIO and 
+                y > self.FRAME_H * self.EXIT_ZONE_RATIO)
+
+    def estimate_speed(self, track_id, prev_pos, curr_pos, current_size):
+        """
+        改进的速度估计算法，增加了稳定性处理和退出区域特殊处理
+        """
+        # 检查是否在退出区域
+        in_exit_zone = self.is_in_exit_zone(curr_pos)
+        
+        # 如果目标进入或离开退出区域，更新状态
+        if in_exit_zone != self.exit_zone_detected.get(track_id, False):
+            self.exit_zone_detected[track_id] = in_exit_zone
+            if in_exit_zone:  # 进入退出区域
+                # 记录进入退出区域时的速度
+                self.exit_zone_speeds[track_id] = self.estimated_speeds.get(track_id, self.CAMERA_SPEED_KMH * 0.5)
+        
+        # 计算像素位移
+        pixel_distance = np.linalg.norm(curr_pos - prev_pos)
+        
+        # 计算透视校正因子
+        corr_factor = self.compute_correction_factor(curr_pos, current_size)
+        
+        # 将像素位移转换为实际距离（单位：米）
+        distance_meters = pixel_distance * self.DISTANCE_SCALE * corr_factor
+
+        # 计算目标的相对面积，作为距离的一个粗略估计指标
+        relative_area = (current_size[0] * current_size[1]) / (self.FRAME_W * self.FRAME_H)
+        # 归一化相对面积
+        normalized_area = np.clip(relative_area * 1000, 0, 1)
+        
+        # 定义远近物体有效的缩放因子边界
+        K_min = 100.0
+        K_max = self.K_FACTOR
+        # 根据归一化面积计算有效的K参数
+        effective_K = K_max - (K_max - K_min) * normalized_area
+        
+        # 计算相对速度
+        raw_relative_speed = self.CAMERA_SPEED_KMH * (1 - (distance_meters / effective_K))
+        
+        # 获取当前目标的历史速度
+        prev_speed = self.estimated_speeds.get(track_id, raw_relative_speed)
+        
+        # 如果目标在退出区域，使用特殊的速度处理逻辑
+        if self.exit_zone_detected.get(track_id, False):
+            # 在退出区域，使用记录的退出区域速度作为基准
+            exit_speed = self.exit_zone_speeds.get(track_id, prev_speed)
+            
+            # 计算目标到图像边缘的距离比例
+            edge_distance_x = (self.FRAME_W - curr_pos[0]) / self.FRAME_W
+            edge_distance_y = (self.FRAME_H - curr_pos[1]) / self.FRAME_H
+            edge_distance = min(edge_distance_x, edge_distance_y)
+            
+            # 使用边缘距离作为速度衰减因子（越接近边缘，速度越小）
+            decay_factor = max(0.1, min(1.0, edge_distance * 5))  # 限制在0.1到1.0之间
+            
+            # 应用衰减因子到退出区域速度
+            target_speed = exit_speed * decay_factor
+            
+            # 限制速度变化幅度
+            speed_change = target_speed - prev_speed
+            if abs(speed_change) > self.MAX_SPEED_CHANGE * 0.3:  # 退出区域的速度变化更缓慢
+                speed_change = np.sign(speed_change) * self.MAX_SPEED_CHANGE * 0.3
+            new_speed = prev_speed + speed_change
+        else:
+            # 正常区域的速度变化限制
+            speed_change = raw_relative_speed - prev_speed
+            # 限制每帧速度变化幅度
+            if abs(speed_change) > self.MAX_SPEED_CHANGE:
+                speed_change = np.sign(speed_change) * self.MAX_SPEED_CHANGE
+            new_speed = prev_speed + speed_change
+        
+        # 应用平滑因子
+        smoothed_speed = prev_speed * self.SMOOTH_FACTOR + new_speed * (1 - self.SMOOTH_FACTOR)
+        
+        # 确保速度在合理范围内
+        final_speed = max(0, min(200, smoothed_speed))
+        
+        # 保存历史速度数据（最多保存10个）
+        history = self.speed_history[track_id]
+        history.append(final_speed)
+        if len(history) > 10:
+            history.pop(0)
+        
+        return final_speed
+
     def toggle_processing(self):
         if not self.is_processing:
             if not (self.model and self.cap and self.cap.isOpened()):
@@ -332,11 +445,14 @@ class ObjectTrackingApp(QMainWindow):
 
             self.prev_positions.clear()
             self.estimated_speeds.clear()
+            self.speed_history.clear()
+            self.exit_zone_detected.clear()
+            self.exit_zone_speeds.clear()
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
             self.is_processing = True
             self.start_btn.setText('停止分析')
-            self.style_button(self.start_btn, bold=True, color="#f44336") # Red stop button
+            self.style_button(self.start_btn, bold=True, color="#f44336")  # Red stop button
             self.statusBar.showMessage("正在处理视频...")
             for widget in self.findChildren((QSpinBox, QDoubleSpinBox)):
                 widget.setEnabled(False)
@@ -349,12 +465,29 @@ class ObjectTrackingApp(QMainWindow):
             self.is_processing = False
             self.timer.stop()
             self.start_btn.setText('开始分析')
-            self.style_button(self.start_btn, bold=True, color="#4CAF50") # Revert to green start button
+            self.style_button(self.start_btn, bold=True, color="#4CAF50")
             self.statusBar.showMessage("处理已停止", 5000)
             for widget in self.findChildren((QSpinBox, QDoubleSpinBox)):
                 widget.setEnabled(True)
             self.load_model_btn.setEnabled(True)
             self.load_video_btn.setEnabled(True)
+
+    def evaluate_danger(self, speed, relative_area):
+        """
+        根据车辆速度和目标在图像中的相对面积评估危险等级。
+        danger_score = estimated_speed * relative_area
+        阈值:
+          - danger_score > 10 认为危险（红色）
+          - danger_score > 5  认为注意（黄色）
+          - 否则安全（绿色）
+        """
+        danger_score = speed * relative_area
+        if danger_score > 10:
+            return "danger", (0, 0, 255)
+        elif danger_score > 5:
+            return "warning", (0, 255, 255)
+        else:
+            return "safe", (50, 205, 50)
 
     def update_frame(self):
         if not self.is_processing or not self.cap or not self.cap.isOpened():
@@ -371,6 +504,7 @@ class ObjectTrackingApp(QMainWindow):
             return
 
         processed_frame = frame.copy()
+        feedback_list = []
 
         try:
             results = self.model.track(
@@ -399,48 +533,30 @@ class ObjectTrackingApp(QMainWindow):
                     speed_calculated = False
                     if self.prev_positions[track_id] is not None:
                         try:
-                            distance = np.linalg.norm(current_pos - self.prev_positions[track_id])
-                            if self.FRAME_H is None or self.FRAME_W is None:
-                                continue
-
-                            y_factor = 1.0 + (1.0 - current_pos[1] / self.FRAME_H) * 2.0
-                            relative_area = (current_size[0] * current_size[1]) / (self.FRAME_W * self.FRAME_H)
-                            size_factor = 1.0 + (1.0 - min(relative_area * 1000, 0.9)) * 2.0
-                            x_factor = 1.0 + 0.2 * abs(current_pos[0] / self.FRAME_W - 0.5)
-                            position_factor = 1.0
-                            if current_pos[0] > self.FRAME_W * 0.75 and current_pos[1] > self.FRAME_H * 0.75:
-                                position_factor = 0.7
-
-                            correction_factor = y_factor * size_factor * x_factor * position_factor
-                            correction_factor = np.clip(correction_factor, 0.1, 20.0)
-
-                            distance_meters = distance * self.DISTANCE_SCALE * correction_factor
-
-                            relative_speed = self.CAMERA_SPEED_KMH * (1 - (distance_meters / self.RELATIVE_SPEED_DENOMINATOR))
-                            relative_speed = max(0, relative_speed)
-
-                            old_speed = self.estimated_speeds.get(track_id, relative_speed)
-                            self.estimated_speeds[track_id] = old_speed * self.SMOOTH_FACTOR + relative_speed * (1 - self.SMOOTH_FACTOR)
-                            self.estimated_speeds[track_id] = max(0, min(200, self.estimated_speeds[track_id]))
+                            # 使用改进的速度估计逻辑
+                            relative_speed = self.estimate_speed(track_id, self.prev_positions[track_id], current_pos, current_size)
+                            self.estimated_speeds[track_id] = relative_speed
                             speed_calculated = True
-
                         except Exception as e:
                             self.estimated_speeds.pop(track_id, None)
 
                     self.prev_positions[track_id] = current_pos
 
-                    color = (50, 205, 50)
-                    cv2.rectangle(processed_frame, (x1, y1), (x2, y2), color, 2)
-                    label = f"ID:{track_id}"
+                    # 如果速度计算成功且大于最低阈值，则显示速度；否则显示"calculating..."
                     if speed_calculated and self.estimated_speeds[track_id] > 0.1:
-                        label += f" {self.estimated_speeds[track_id]:.1f}km/h"
+                        current_area = (current_size[0] * current_size[1]) / (self.FRAME_W * self.FRAME_H)
+                        risk_level, color = self.evaluate_danger(self.estimated_speeds[track_id], current_area)
+                        label = f"ID:{track_id} {self.estimated_speeds[track_id]:.1f}km/h [{risk_level}]"
                     else:
-                        label += " ...km/h"
+                        risk_level, color = "calculating", (255, 255, 255)
+                        label = f"ID:{track_id} calculating..."
 
+                    feedback_list.append(label)
+                    cv2.rectangle(processed_frame, (x1, y1), (x2, y2), color, 2)
                     (label_width, label_height), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
                     label_y = y1 - 5 if y1 - 5 > label_height else y1 + label_height + 5
                     overlay = processed_frame.copy()
-                    cv2.rectangle(overlay, (x1, label_y - label_height - baseline), (x1 + label_width, label_y), (0,0,0), -1)
+                    cv2.rectangle(overlay, (x1, label_y - label_height - baseline), (x1 + label_width, label_y), (0, 0, 0), -1)
                     alpha = 0.6
                     cv2.addWeighted(overlay, alpha, processed_frame, 1 - alpha, 0, processed_frame)
                     cv2.putText(processed_frame, label, (x1, label_y - baseline + 1), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
@@ -449,12 +565,19 @@ class ObjectTrackingApp(QMainWindow):
                 for gone_id in disappeared_ids:
                     self.estimated_speeds.pop(gone_id, None)
                     self.prev_positions.pop(gone_id, None)
+                    self.speed_history.pop(gone_id, None)
+                    self.exit_zone_detected.pop(gone_id, None)
 
             self.display_frame(processed_frame)
+            self.feedback_label.setPlainText("\n".join(feedback_list))
+            if any("危险" in txt for txt in feedback_list):
+                self.statusBar.showMessage("预警：检测到危险车辆！", 3000)
+            else:
+                self.statusBar.showMessage("正在处理...", 1000)
 
             end_frame_time = time.time()
             processing_fps = 1.0 / (end_frame_time - start_frame_time) if (end_frame_time - start_frame_time) > 0 else 0
-            self.statusBar.showMessage(f"正在处理... FPS: {processing_fps:.1f}")
+            self.statusBar.showMessage(f"正在处理... FPS: {processing_fps:.1f}", 1000)
 
         except Exception as e:
             print(f"处理帧时发生严重错误: {e}")
