@@ -54,7 +54,7 @@ class ObjectTrackingApp(QMainWindow):
     def initUI(self):
         """初始化UI界面"""
         self.setWindowTitle('智能车辆分析与预警系统')
-        self.setGeometry(100, 100, 1450, 950)
+        self.setGeometry(100, 100, 1200, 800)  # 减小窗口尺寸
 
         # --- 设置主窗口背景 ---
         palette = self.palette()
@@ -67,16 +67,16 @@ class ObjectTrackingApp(QMainWindow):
         self.setCentralWidget(main_widget)
 
         layout = QHBoxLayout(main_widget)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(20)
+        layout.setContentsMargins(10, 10, 10, 10)  # 减小边距
+        layout.setSpacing(10)  # 减小间距
 
         # --- 左侧控制面板 ---
         control_panel = QWidget()
-        control_panel.setMaximumWidth(450)
+        control_panel.setMaximumWidth(350)  # 减小控制面板宽度
         control_layout = QVBoxLayout(control_panel)
-        control_layout.setSpacing(20)
+        control_layout.setSpacing(10)  # 减小间距
         control_layout.setAlignment(Qt.AlignTop)
-        control_panel.setStyleSheet("background-color: #f9f9f9; border-radius: 10px; padding: 15px;")
+        control_panel.setStyleSheet("background-color: #f9f9f9; border-radius: 8px; padding: 10px;")  # 减小内边距
 
         # --- 模型加载组 ---
         model_group = QGroupBox("模型设置")
@@ -108,7 +108,7 @@ class ObjectTrackingApp(QMainWindow):
         params_group = QGroupBox("速度估计参数调整")
         self.style_group_box(params_group)
         params_layout = QVBoxLayout(params_group)
-        params_layout.setSpacing(15)
+        params_layout.setSpacing(8)  # 减小间距
 
         # 基准速度
         speed_layout = QHBoxLayout()
@@ -166,12 +166,26 @@ class ObjectTrackingApp(QMainWindow):
         dist_scale_layout.addWidget(self.dist_scale_spinbox)
         params_layout.addLayout(dist_scale_layout)
 
+        # 速度缩放因子K
+        k_factor_layout = QHBoxLayout()
+        k_factor_label = QLabel('速度缩放因子K:')
+        self.style_label(k_factor_label)
+        k_factor_layout.addWidget(k_factor_label)
+        self.k_factor_spinbox = QDoubleSpinBox()
+        self.style_spinbox(self.k_factor_spinbox)
+        self.k_factor_spinbox.setRange(50.0, 500.0)
+        self.k_factor_spinbox.setSingleStep(10.0)
+        self.k_factor_spinbox.setValue(self.K_FACTOR)
+        self.k_factor_spinbox.valueChanged.connect(lambda v: setattr(self, 'K_FACTOR', v))
+        k_factor_layout.addWidget(self.k_factor_spinbox)
+        params_layout.addLayout(k_factor_layout)
+
         # --- 控制按钮 ---
         self.start_btn = QPushButton('开始分析')
         self.style_button(self.start_btn, bold=True, color="#4CAF50")  # Green start button
         self.start_btn.clicked.connect(self.toggle_processing)
         self.start_btn.setEnabled(False)
-        self.start_btn.setMinimumHeight(50)
+        self.start_btn.setMinimumHeight(40)  # 减小按钮高度
 
         # --- 预警信息显示组 ---
         alert_group = QGroupBox("预警信息")
@@ -179,7 +193,8 @@ class ObjectTrackingApp(QMainWindow):
         alert_layout = QVBoxLayout(alert_group)
         self.feedback_label = QTextEdit()
         self.feedback_label.setReadOnly(True)
-        self.feedback_label.setStyleSheet("font-size: 14px;")
+        self.feedback_label.setStyleSheet("font-size: 12px;")  # 减小字体大小
+        self.feedback_label.setMaximumHeight(100)  # 限制预警信息区域高度
         alert_layout.addWidget(self.feedback_label)
 
         # --- 将所有组件添加到控制面板布局 ---
@@ -193,9 +208,9 @@ class ObjectTrackingApp(QMainWindow):
         # --- 右侧视频显示 ---
         self.video_label = QLabel("请先加载模型和视频文件")
         self.video_label.setAlignment(Qt.AlignCenter)
-        self.video_label.setStyleSheet("background-color: #212121; color: #ffffff; border-radius: 10px; padding: 10px;")
+        self.video_label.setStyleSheet("background-color: #212121; color: #ffffff; border-radius: 8px; padding: 8px;")
         self.video_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.video_label.setMinimumSize(800, 600)
+        self.video_label.setMinimumSize(600, 450)  # 减小视频显示区域最小尺寸
 
         # --- 将控制面板和视频显示添加到主布局 ---
         layout.addWidget(control_panel)
@@ -210,23 +225,23 @@ class ObjectTrackingApp(QMainWindow):
     def style_group_box(self, group_box):
         group_box.setStyleSheet("""
             QGroupBox {
-                font-size: 16px;
-                border: 2px solid #42A5F5;
-                border-radius: 7px;
-                margin-top: 15px;
+                font-size: 14px;
+                border: 1px solid #42A5F5;
+                border-radius: 5px;
+                margin-top: 12px;
                 background-color: #e3f2fd;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
                 subcontrol-position: top left;
-                left: 10px;
+                left: 8px;
                 padding: 0 3px 0 3px;
                 color: #1976D2;
             }
         """)
 
     def style_label(self, label):
-        label.setStyleSheet("font-size: 14px; color: #333;")
+        label.setStyleSheet("font-size: 12px; color: #333;")
 
     def style_button(self, button, bold=False, color="#1976D2"):
         font_weight = "bold" if bold else "normal"
@@ -235,9 +250,9 @@ class ObjectTrackingApp(QMainWindow):
                 background-color: {color};
                 color: white;
                 border: none;
-                border-radius: 5px;
-                padding: 10px 20px;
-                font-size: 16px;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-size: 13px;
                 font-weight: {font_weight};
             }}
             QPushButton:hover {{
@@ -255,8 +270,8 @@ class ObjectTrackingApp(QMainWindow):
             QSpinBox, QDoubleSpinBox {
                 border: 1px solid #757575;
                 border-radius: 3px;
-                padding: 5px;
-                font-size: 14px;
+                padding: 3px;
+                font-size: 12px;
             }
         """)
 

@@ -16,6 +16,7 @@ CURRENT_VEHICLE_SPEED = 110.0         # 当前车辆速度（单位：km/h）
 K_FACTOR = 200.0                   # 用于放大速度变化的缩放因子（可依据实际情况调整）
 SMOOTH_FACTOR = 0.5                # 平滑因子（用于滤波平滑速度变化）
 DISTANCE_SCALE = 0.5               # 像素距离转换到实际距离的基础因子（需依据标定调整）
+DISPLAY_SCALE = 60                 # 显示窗口缩放比例（百分比）
 
 # -------------------------------
 # 定义工具函数
@@ -86,6 +87,10 @@ fps = cap.get(cv2.CAP_PROP_FPS)  # 获取视频帧率
 frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
 
+# 计算显示窗口的尺寸
+display_width = int(frame_width * DISPLAY_SCALE / 100)
+display_height = int(frame_height * DISPLAY_SCALE / 100)
+
 # 用于存储每个跟踪目标上一帧的位置以及平滑后的速度
 prev_positions = defaultdict(lambda: None)
 speeds = defaultdict(float)
@@ -135,7 +140,9 @@ while cap.isOpened():
                 cv2.putText(annotated_frame, speed_text, (x, y - 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-    cv2.imshow("YOLO11 Tracking - 优化版", annotated_frame)
+    # 调整显示窗口大小
+    resized_frame = cv2.resize(annotated_frame, (display_width, display_height), interpolation=cv2.INTER_AREA)
+    cv2.imshow("YOLO11 Tracking - 优化版", resized_frame)
 
     # 按 'q' 键退出循环
     if cv2.waitKey(1) & 0xFF == ord("q"):
